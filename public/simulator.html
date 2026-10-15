@@ -1,0 +1,308 @@
+<!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Divina · S58 exhaust simulator</title>
+<style>
+:root{--bg:#f4f4f2;--fg:#17181a;--mu:#6b6e73;--card:#fff;--bd:#d9dad6;--ac:#1c69d4;--rd:#d12b2b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0e0f11;--fg:#ececea;--mu:#9a9da3;--card:#17191c;--bd:#2c2f34;--ac:#5b9bff;--rd:#ff5a5a}}
+:root[data-theme=dark]{--bg:#000;--fg:#ececea;--mu:#9a9da3;--card:#0b0c0e;--bd:#2c2f34;--ac:#5b9bff;--rd:#ff5a5a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:880px;margin:auto;padding:16px}h1{font-size:20px;margin:0}p{margin:4px 0;color:var(--mu)}
+.g{display:grid;gap:12px;grid-template-columns:1fr 1fr}@media(max-width:640px){.g{grid-template-columns:1fr}}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px}
+canvas{width:100%;display:block}button,select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px 12px}
+button.p{background:var(--ac);color:#fff;border:0;font-weight:600}button{touch-action:none;user-select:none}
+label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0;font-size:14px}input[type=range]{flex:1;max-width:60%}
+.dots{display:flex;gap:6px;justify-content:center;margin:6px 0}.dots i{width:34px;height:34px;border-radius:50%;border:2px solid var(--bd);display:grid;place-items:center;font-style:normal;font-size:13px;color:var(--mu);transition:background .25s}
+.warn{border-color:#e0a100;background:rgba(224,161,0,.12);padding:8px 10px;border-radius:8px;font-size:13px;margin-top:8px;display:none}small{color:var(--mu);display:block;margin-top:6px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.full{grid-column:1/-1}h2.gh{font-size:18px;margin:22px 0 4px}.c b{display:block}.c p{margin:2px 0 6px;font-size:13px}.row button[data-r]{padding:6px 10px}audio{width:100%;margin-top:6px}</style></head><body><main>
+<h1>Divina S58 · G80 M3 / G82 M4 — exhaust simulator</h1>
+<p>Physical synthesis: inline-6, firing order 1-5-3-6-2-4, twin-turbo, 7,200 rpm cut, propagating through a pipe network built from the CAD dimensions (downpipes, loop, 18° X-pipe, 650 mm J-pipes, muffler, Y, tips).</p>
+<div class="row"><button class="p" id="go">▶ Start audio</button><button id="pedal">Throttle (hold · Space)</button><button id="sweep">Auto sweep</button></div>
+<div class="g"><div class="c"><canvas id="gauge" width="400" height="230"></canvas><div class="dots" id="dots"></div><p id="info" style="text-align:center"></p></div>
+<div class="c"><canvas id="spec" width="400" height="230"></canvas><small>Spectrum (0–3 kHz). Fixed lines = pipe resonances; lines that rise with rpm = engine orders.</small></div>
+<div class="c"><label>Throttle<input type="range" id="thr" min="0" max="100" value="0"></label>
+<label>Gear<select id="gear"><option value="0">Neutral</option><option value="1">2nd</option><option value="2" selected>3rd</option><option value="3">4th</option></select></label>
+<label>Exhaust valve<select id="valve"><option value="auto">Automatic</option><option value="open">Open</option><option value="closed">Closed</option></select></label>
+<label>Microphone<select id="mic"><option value="0">External (rear)</option><option value="1">Cabin</option></select></label>
+<label>Volume<input type="range" id="vol" min="0" max="150" value="80"></label>
+<label>Overrun pops<input type="checkbox" id="pops" checked></label></div>
+<div class="c"><b>Length compensation</b><label>Bank 1 loop <span id="lv">330 mm</span><input type="range" id="loop" min="0" max="400" step="10" value="330"></label>
+<label>Bank 2 upstream extra <span id="uv">0 mm</span><input type="range" id="up" min="0" max="400" step="10" value="0"></label>
+<small>The CAD has identical downpipes, so the +330 mm loop alone unbalances the banks (half-orders 1.5/4.5 appear). If the real car has a longer Bank 2 upstream, set the extra to ~330 mm.</small>
+<hr style="border:0;border-top:1px solid var(--bd);margin:10px 0"><label><b>“V12” emulation</b><input type="checkbox" id="v12"></label>
+<div class="warn" id="w"><b>EMULATION.</b> This is not the S58: it fires 12 pulses per cycle (6 per revolution) through the same exhaust. The real S58 gives 3 per revolution.</div></div></div>
+<small>1D waveguide model (c ≈ 420–620 m/s depending on temperature). Not a recording; validate with a dyno + microphone. CAD positions are placeholders, as stated in the technical guide.</small>
+<h2 class="gh">ZF 8HP automatic gearbox (Steptronic)</h2><div class="g">
+<div class="c full"><b>Shift simulator</b>
+<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><div id="gdisp" style="font:700 56px/1 system-ui;min-width:96px">D1</div><div id="gtx" style="flex:1;min-width:220px;color:var(--mu)"></div></div>
+<div class="dots" id="gbar"></div>
+<label>8HP automatic gearbox (car running)<input type="checkbox" id="atx" checked></label>
+<label>Mode<select id="atm"><option value="D">D · Comfort</option><option value="S">S · Sport</option><option value="M">M · Manual (paddles)</option></select></label>
+<div class="row"><button id="bdn">− Downshift (←)</button><button id="bup">+ Upshift (→)</button><button id="brk">Brake (hold · B)</button><button id="rst">Stop the car</button></div>
+<small>Hold Space (or use the throttle) to pull away. With the gearbox on, rpm comes from speed, gear and torque converter, and the engine sound follows that rpm. The auto sweep becomes a launch with shifts. Locking the rpm turns the gearbox off. Paddles in D or S switch the gearbox to M.</small></div>
+<div class="c"><b>Shift map</b><p>Solid lines: upshifts. Dashed lines: downshifts. The dot is the car right now.</p><canvas id="gx" width="400" height="200"></canvas></div>
+<div class="c"><b>RPM × speed per gear</b><p>The eight 8HP ratios and the 7,200 rpm cut line.</p><canvas id="gr" width="400" height="200"></canvas></div>
+<div class="c full"><b>Last 30 s history</b><p>RPM, speed (0–300 km/h), gear as steps and throttle in grey.</p><canvas id="gh" width="800" height="200"></canvas></div>
+<div class="c full"><b>S58 torque and power</b><p>Curve used in the car model. The line is the current rpm.</p><canvas id="gt" width="800" height="180"></canvas></div>
+</div>
+<h2 class="gh">Full guide: charts and rpm control</h2><div class="g">
+<div class="c full"><b>RPM control</b>
+<label>Target rpm <span id="rv">3000 rpm</span><input type="range" id="rpm" min="750" max="7200" step="10" value="3000"></label>
+<label>Lock rpm at this value<input type="checkbox" id="lock"></label>
+<div class="row"><button data-r="750">Idle</button><button data-r="3000">3.000</button><button data-r="5000">5.000</button><button data-r="7000">7.000</button></div>
+<small>With the rpm locked the throttle stays at 25% or more, so there are no pops. Arrow keys ↑ and ↓ change 250 rpm and lock. When unlocked, the pedal and the sweep work as before.</small></div>
+<div class="c full"><b>Spectrogram</b><p>0–3 kHz, time scrolling to the left. Under acceleration, the engine orders fan upward.</p><canvas id="sg" width="800" height="200"></canvas></div>
+<div class="c"><b>Waveform</b><p>Last 2048 samples, left channel.</p><canvas id="os" width="400" height="200"></canvas></div>
+<div class="c"><b>Firing order</b><p>720° cycle. Blue = bank 1, red = bank 2. The line is the current angle.</p><canvas id="fr" width="400" height="200"></canvas></div>
+<div class="c full"><b>RPM × frequency</b><p>Ignition orders 1×, 2× and 3×, the 400–900 Hz band and the J-pipe quarter-wave resonance (dashed).</p><canvas id="rf" width="800" height="200"></canvas></div>
+<div class="c full"><b>Gas path and bank-to-bank delay</b><p>Dimensions read from the model, including the loop and extra set above.</p><canvas id="wg" width="800" height="230"></canvas></div>
+<div class="c full"><b>Frequency response of the pipe network</b><p>Measured by impulse on the model itself, in both valve states. Recalculates when loop, extra or V12 change.</p><canvas id="fz" width="800" height="220"></canvas></div>
+<div class="c full"><b>Audio file</b><p>Renders 20 s (750 → 7,200 → 750 rpm) with the sound engine and the current settings.</p>
+<div class="row"><button class="p" id="rend">Render sweep</button><button id="dl" disabled>Save S58_V12_Sound_Simulation</button></div><audio id="au" controls></audio><small id="dm">The download is a .zip with a 16-bit stereo WAV.</small></div>
+</div>
+</main><script>
+/* S58 exhaust synth: fonte de pulsos por cilindro -> turbina -> rede de guias de onda 1D (cotas do CAD) -> 2 ponteiras */
+function S58Engine(fs){
+const M=1023,T=Math.PI*2,rnd=Math.random,lp=f=>1-Math.exp(-T*f/fs);
+const Line=()=>({b:new Float32Array(1024),i:0}),push=(L,x)=>{L.b[L.i]=x;L.i=(L.i+1)&M};
+const rd=(L,d)=>{const p=L.i-d,k=Math.floor(p),f=p-k;return L.b[k&M]*(1-f)+L.b[(k+1)&M]*f};
+const a2=d=>(d-2)*(d-2); // area ~ d_int^2 (parede 1 mm)
+function Seg(mm,A,c,loss,fc){return{mm,A,c,loss,fa:lp(fc),D:1,g:1,f:Line(),b:Line(),fy:0,by:0,fo:0,bo:0}}
+function outs(s){let r=rd(s.f,s.D);s.fy+=s.fa*(r-s.fy);s.fo=s.fy*s.g;r=rd(s.b,s.D);s.by+=s.fa*(r-s.by);s.bo=s.by*s.g}
+function J(ps){return ps.map(([s,e])=>({s,e,x:0}))}
+function runJ(j){let S=0,N=0;for(const p of j){p.x=p.e?p.s.fo:p.s.bo;S+=p.s.A;N+=p.s.A*p.x}const pj=2*N/S;for(const p of j)push(p.e?p.s.b:p.s.f,pj-p.x)}
+/* ---- geometria (mm) vinda de paths.py/params.py ---- */
+const G={dp:598,red:90,mid:[1240,910],fus:405.9,leg:1142.2,tee:80,lead:100,muf:380,ym:452,tip:230,jp:650};
+const pre=(G.leg-G.fus)/2, Am=a2(63.5), Acore=a2(76), Abaf=a2(44.5);
+const C={dp:620,mid:570,xp:530,tail:480,ym:450,tip:420,jp:530};
+const S=[],mk=(...a)=>{const s=Seg(...a);S.push(s);return s};
+const dp=[0,1].map(()=>mk(G.dp,a2(70),C.dp,.05,7000));
+const mid=[0,1].map(k=>mk(G.red+G.mid[k]+pre,Am,C.mid,.05,6500));
+const com=mk(G.fus,1.55*Am,C.xp,.06,6000);
+const po=[0,1].map(()=>mk(pre-G.tee,Am,C.xp,.05,6000));
+const jp=[0,1].map(()=>mk(G.jp,a2(50.8),C.jp,.06,5000));
+const tl=[0,1].map(()=>mk(G.tee+G.lead,Am,C.tail,.05,6000));
+const mf=[0,1].map(()=>mk(G.muf,Am,C.tail,.1,4500));
+const ym=[0,1].map(()=>mk(G.ym,a2(76.2),C.ym,.05,6000));
+const tp=[0,1].map(()=>mk(G.tip,a2(101.6),C.tip,.04,6000));
+const N1=[0,1].map(k=>J([[dp[k],1],[mid[k],0]])), X1=J([[mid[0],1],[mid[1],1],[com,0]]), X2=J([[com,1],[po[0],0],[po[1],0]]);
+const TT=[0,1].map(k=>J([[po[k],1],[tl[k],0],[jp[k],0]])), M1=[0,1].map(k=>J([[tl[k],1],[mf[k],0]]));
+const M2=[0,1].map(k=>J([[mf[k],1],[ym[k],0]])), Y=[0,1].map(k=>J([[ym[k],1],[tp[k],0]]));
+const E={rpm:750,pedal:0,load:0,gear:0,cut:false,v:1,valve:'auto',v12:false,pops:true,cabin:false,vol:1,onFire:null,
+  ang:0,nextEv:0,ev:0,act:[],cyl:[1,.97,1.03,.99,1.02,.98],G};
+/* pulso de blowdown no domínio do ângulo (0..130°) */
+const SH=new Float32Array(257);{let m=0;for(let i=0;i<=256;i++){const t=i/256*130;SH[i]=(1-Math.exp(-t/5))*Math.exp(-t/26);m=Math.max(m,SH[i])}for(let i=0;i<=256;i++)SH[i]/=m}
+const ORDER=[1,5,3,6,2,4],GEAR=[1,.5,.33,.24];
+const st={ta:[0,0],tb:[0,0],mt:[0,0],nz:0,pop:[0,0],rp:[0,0],rl:[0,0],dx:0,dy:0,ex:0,ey:0,cl:[0,0],t:0};
+function dyn(dt){
+  E.load+=(E.pedal-E.load)*Math.min(1,dt*10);
+  const g=GEAR[E.gear];
+  if(E.cut){E.rpm-=3200*dt;if(E.rpm<7200-130)E.cut=false}
+  else if(E.pedal>.02)E.rpm+=E.pedal*g*5200*(1-.35*E.rpm/7200)*dt;
+  else E.rpm-=(500+E.rpm*.5)*(E.gear?1.4:1)*dt;
+  if(E.rpm<750)E.rpm=750; if(E.rpm>=7200){E.rpm=7200;E.cut=true}
+  const vt=E.valve==='open'?1:E.valve==='closed'?0:(E.rpm>3800||E.load>.75?1:0);
+  E.v+=(vt-E.v)*Math.min(1,dt*8);
+  const tf=.9+.1*E.load;
+  for(const s of S){s.D=Math.max(1,s.mm*fs/(1000*s.c*tf));s.g=1-s.loss*s.mm/1000}
+  for(const k of[0,1]){mf[k].A=Abaf+E.v*Acore;mf[k].fa=lp(700+5000*E.v);mf[k].g=1-(.15+1.6*(1-E.v))*G.muf/1000}
+}
+const nEv=()=>E.v12?12:6;
+function fire(){
+  const n=nEv(),k=E.ev%n,cyl=E.v12?(k+1):ORDER[k],bank=E.v12?k%2:(cyl<=3?0:1);
+  let a=(.18+.82*E.load)*(.55+.45*E.rpm/7200)*(1+.6*E.load*Math.min(1,Math.max(0,(E.rpm-2000)/2000)));
+  a*=(E.v12?.7:E.cyl[cyl-1])*(1+.08*(rnd()-.5));
+  if(E.cut&&rnd()>.12)a*=.04;
+  E.act.push({t0:E.ang,a,bank,w:E.v12?1.5:1});
+  if(E.onFire)E.onFire(cyl,bank,E.rpm);
+  E.ev++;E.nextEv+=720/n;
+}
+E.process=function(oL,oR,n){
+  const dt=1/fs,kT=lp(1100+3000*(.3+.7*E.load));
+  for(let i=0;i<n;i++){
+    if((i&31)===0)dyn(32*dt);
+    E.ang+=E.rpm*6*dt;
+    while(E.ang>=E.nextEv)fire();
+    const s=[0,0],z=rnd()*2-1;st.nz+=.35*(z-st.nz);
+    for(let j=E.act.length-1;j>=0;j--){const p=E.act[j],th=(E.ang-p.t0)*p.w;
+      if(th>=130){E.act.splice(j,1);continue}
+      const f=th*256/130,q=f|0,v=SH[q]+(SH[q+1]-SH[q])*(f-q);
+      s[p.bank]+=p.a*v*(1+.5*st.nz*(.5+E.load))}
+    if(E.pops&&E.pedal<.05&&E.rpm>2200&&rnd()<dt*(E.rpm-2000)/1400)st.pop[rnd()<.5?0:1]=.5+rnd()*.8;
+    for(const k of[0,1]){
+      st.pop[k]*=.9985; s[k]+=st.pop[k]*z*.6*st.pop[k];
+      st.ta[k]+=kT*(s[k]-st.ta[k]);st.tb[k]+=kT*(st.ta[k]-st.tb[k]);s[k]=st.tb[k];if(E.ts)s[k]=E.ts[k];
+      outs(dp[k]);outs(mid[k]);outs(po[k]);outs(jp[k]);outs(tl[k]);outs(mf[k]);outs(ym[k]);outs(tp[k])}
+    outs(com);
+    for(const k of[0,1]){
+      push(dp[k].f,s[k]*2+.55*dp[k].bo);        // turbina: fonte + reflexão parcial
+      runJ(N1[k]);runJ(TT[k]);runJ(M1[k]);runJ(M2[k]);runJ(Y[k]);
+      push(jp[k].b,.985*jp[k].fo);              // J-pipe: fundo cego
+      const inc=tp[k].fo;st.mt[k]+=lp(1800)*(inc-st.mt[k]);const out=-.96*st.mt[k];push(tp[k].b,out); // boca aberta
+      const u=inc-out,d=u-st.rp[k];st.rp[k]=u;st.rl[k]+=lp(5000)*(d-st.rl[k]);
+      st.cl[k]=st.rl[k]+(E.pedal+.1)*(E.rpm/7200)**2*.03*z; // ruído de escoamento na ponteira
+    }
+    runJ(X1);runJ(X2);
+    let l=st.cl[0]+.3*st.cl[1],r=st.cl[1]+.3*st.cl[0];
+    if(E.cabin){const m=(l+r)*.5;st.t+=lp(900)*(m-st.t);l=r=st.t*1.6}
+    const y=l*3*E.vol,yy=r*3*E.vol;
+    const dcL=y-st.dx+.995*st.dy;st.dx=y;st.dy=dcL;
+    const dcR=yy-st.ex+.995*st.ey;st.ex=yy;st.ey=dcR;
+    oL[i]=Math.tanh(dcL);oR[i]=Math.tanh(dcR);
+  }
+};
+E.setComp=(loop,up)=>{mid[0].mm=G.red+G.mid[1]+loop+pre;mid[1].mm=G.red+G.mid[1]+pre;dp[1].mm=G.dp+up};E.setComp(330,0);
+E.reset=()=>{E.act=[];E.ang=0;E.nextEv=0;E.ev=0;E.cut=false};
+E.segs=S;
+return E}
+if(typeof module!=='undefined')module.exports=S58Engine;
+
+const $=i=>document.getElementById(i);let ctx,E,an,sw=0,held=0,fl=[0,0,0,0,0,0,0];
+$('dots').innerHTML=[1,2,3,4,5,6].map(i=>`<i id="d${i}">${i}</i>`).join('');
+function start(){if(ctx)return;ctx=new(window.AudioContext||window.webkitAudioContext)();E=S58Engine(ctx.sampleRate);
+ E.onFire=(c)=>{const d=$('d'+c);d.style.background='var(--ac)';d.style.color='#fff';setTimeout(()=>{d.style.background='';d.style.color=''},E.v12?30:90)};
+ const sp=ctx.createScriptProcessor(2048,0,2);sp.onaudioprocess=e=>E.process(e.outputBuffer.getChannelData(0),e.outputBuffer.getChannelData(1),2048);
+ an=ctx.createAnalyser();an.fftSize=4096;an.smoothingTimeConstant=.6;sp.connect(an);an.connect(ctx.destination);apply();$('go').textContent='Audio on';}
+function apply(){if(!E)return;E.gear=+$('gear').value;E.valve=$('valve').value;E.cabin=$('mic').value==='1';E.vol=$('vol').value/80;E.pops=$('pops').checked;E.v12=$('v12').checked;E.setComp(+$('loop').value,+$('up').value);
+ $('lv').textContent=$('loop').value+' mm';$('uv').textContent=$('up').value+' mm';$('w').style.display=E.v12?'block':'none'}
+$('go').onclick=()=>{start();ctx.resume()};
+['gear','valve','mic','vol','pops','v12','loop','up'].forEach(i=>$(i).oninput=apply);
+const pd=$('pedal');pd.onpointerdown=()=>{start();ctx.resume();held=1;pd.setPointerCapture&&0};pd.onpointerup=pd.onpointerleave=()=>held=0;
+addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();start();ctx.resume();held=1}});addEventListener('keyup',e=>{if(e.code==='Space')held=0});
+$('sweep').onclick=()=>{start();ctx.resume();sw=Date.now()};
+function loop(){requestAnimationFrame(loop);if(E){let p=+$('thr').value/100;if(held)p=1;if(sw){const t=(Date.now()-sw)/1000;if(t<9)p=1;else sw=0}E.pedal=p;
+ gauge();spec();$('info').textContent=`${Math.round(E.rpm)} rpm · ${Math.round(E.rpm/60*(E.v12?6:3))} Hz ignition${E.cut?' · CUT':''} · valve ${E.v>.5?'open':'closed'}`}else gauge()}
+function gauge(){const c=$('gauge').getContext('2d'),W=400,H=230,r=E?E.rpm:750,cs=getComputedStyle(document.documentElement);c.clearRect(0,0,W,H);
+ const a=v=>Math.PI*(1+v/8000*1.0),cx=200,cy=200;c.lineWidth=14;c.strokeStyle=cs.getPropertyValue('--bd');c.beginPath();c.arc(cx,cy,150,Math.PI,2*Math.PI);c.stroke();
+ c.strokeStyle=cs.getPropertyValue('--rd');c.beginPath();c.arc(cx,cy,150,a(7200),a(8000));c.stroke();c.strokeStyle=cs.getPropertyValue('--ac');c.beginPath();c.arc(cx,cy,150,Math.PI,a(r));c.stroke();
+ c.fillStyle=cs.getPropertyValue('--fg');c.font='bold 40px system-ui';c.textAlign='center';c.fillText(Math.round(r),cx,cy-30);c.font='14px system-ui';c.fillStyle=cs.getPropertyValue('--mu');c.fillText('rpm · cut 7,200',cx,cy-8)}
+function spec(){const c=$('spec').getContext('2d'),cs=getComputedStyle(document.documentElement),d=new Uint8Array(an.frequencyBinCount);an.getByteFrequencyData(d);c.clearRect(0,0,400,230);
+ const nb=Math.floor(3000/(ctx.sampleRate/2)*d.length);c.fillStyle=cs.getPropertyValue('--ac');for(let i=0;i<nb;i+=2){const h=d[i]/255*220,x=i/nb*400;c.fillRect(x,230-h,2,h)}}
+loop();
+</script><script>
+const V=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim(),TX=(c,s,x,y,k)=>{c.fillStyle=k||V('--mu');c.fillText(s,x,y)};
+const ES=S58Engine(44100),FIR=[1,5,3,6,2,4],CV={};let IR=null,irT=0,fdz=null;
+['sg','os','fr','rf','wg','fz'].forEach(i=>{CV[i]=$(i).getContext('2d');CV[i].font='12px system-ui'});CV.sg.fillStyle='#0b0d10';CV.sg.fillRect(0,0,800,200);
+function fft(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j&b;b>>=1)j^=b;j^=b;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]]}}
+for(let l=2;l<=n;l<<=1){const a=-2*Math.PI/l;for(let i=0;i<n;i+=l)for(let k=0;k<l/2;k++){const c=Math.cos(a*k),s=Math.sin(a*k),x=i+k,y=x+l/2,tr=re[y]*c-im[y]*s,ti=re[y]*s+im[y]*c;re[y]=re[x]-tr;im[y]=im[x]-ti;re[x]+=tr;im[x]+=ti}}}
+function cfg(e){e.gear=+$('gear').value;e.valve=$('valve').value;e.cabin=$('mic').value==='1';e.vol=$('vol').value/80;e.pops=$('pops').checked;e.v12=$('v12').checked;e.setComp(+$('loop').value,+$('up').value)}
+function irs(valve){const fs=44100,e=S58Engine(fs),n=8192,o=new Float32Array(n),r=new Float32Array(1);e.setComp(+$('loop').value,+$('up').value);e.v12=$('v12').checked;e.valve=valve;e.v=valve==='open'?1:0;e.vol=.02;e.pops=false;e.pedal=0;e.rpm=750;e.ts=[0,0];
+for(let i=0;i<n;i++){e.ts[0]=i?0:1;e.process(o.subarray(i,i+1),r,1)}
+const im=new Float32Array(n);fft(o,im);const m=new Float32Array(557);for(let i=0;i<557;i++)m[i]=Math.hypot(o[i],im[i]);
+return m.map((_,i)=>{let s=0,k=0;for(let j=-3;j<=3;j++)if(m[i+j]!==undefined){s+=m[i+j];k++}return 20*Math.log10(s/k+1e-12)})}
+const calcIR=()=>{IR=[irs('open'),irs('closed')]};
+['loop','up','v12'].forEach(i=>$(i).addEventListener('input',()=>{clearTimeout(irT);irT=setTimeout(calcIR,300)}));setTimeout(calcIR,60);
+/* rotação */
+const setR=(v,l)=>{v=Math.max(750,Math.min(7200,v));$('rpm').value=v;$('rv').textContent=Math.round(v)+' rpm';if(l)$('lock').checked=true};
+$('rpm').oninput=()=>{setR(+$('rpm').value,1)};document.querySelectorAll('button[data-r]').forEach(b=>b.onclick=()=>setR(+b.dataset.r,1));
+addEventListener('keydown',e=>{if((e.key==='ArrowUp'||e.key==='ArrowDown')&&!($('atx').checked&&!$('lock').checked)){e.preventDefault();setR((E&&$('lock').checked?+$('rpm').value:(E?E.rpm:3000))+(e.key==='ArrowUp'?250:-250),1)}});
+/* wav + zip */
+function wavEnc(L,R,fs){const n=L.length,b=new DataView(new ArrayBuffer(44+n*4)),s=(o,t)=>[...t].forEach((c,i)=>b.setUint8(o+i,c.charCodeAt(0)));
+s(0,'RIFF');b.setUint32(4,36+n*4,true);s(8,'WAVEfmt ');b.setUint32(16,16,true);b.setUint16(20,1,true);b.setUint16(22,2,true);b.setUint32(24,fs,true);b.setUint32(28,fs*4,true);b.setUint16(32,4,true);b.setUint16(34,16,true);s(36,'data');b.setUint32(40,n*4,true);
+const q=v=>Math.round(Math.max(-1,Math.min(1,v))*32767);for(let i=0;i<n;i++){b.setInt16(44+i*4,q(L[i]),true);b.setInt16(46+i*4,q(R[i]),true)}return new Uint8Array(b.buffer)}
+function crcK(u){const t=crcK.t||(crcK.t=[...Array(256)].map((_,n)=>{let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;return c>>>0}));let r=-1;for(let i=0;i<u.length;i++)r=t[(r^u[i])&255]^(r>>>8);return(r^-1)>>>0}
+function zipK(name,u){const nb=new TextEncoder().encode(name),l=nb.length,c=crcK(u),n=u.length,o=new Uint8Array(30+l+n+46+l+22),v=new DataView(o.buffer);
+v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint32(14,c,true);v.setUint32(18,n,true);v.setUint32(22,n,true);v.setUint16(26,l,true);o.set(nb,30);o.set(u,30+l);
+const p=30+l+n;v.setUint32(p,0x02014b50,true);v.setUint16(p+4,20,true);v.setUint16(p+6,20,true);v.setUint32(p+16,c,true);v.setUint32(p+20,n,true);v.setUint32(p+24,n,true);v.setUint16(p+28,l,true);o.set(nb,p+46);
+const q=p+46+l;v.setUint32(q,0x06054b50,true);v.setUint16(q+8,1,true);v.setUint16(q+10,1,true);v.setUint32(q+12,46+l,true);v.setUint32(q+16,p,true);return o}
+$('rend').onclick=()=>{const fs=44100,N=fs*20,L=new Float32Array(N),R=new Float32Array(N),e=S58Engine(fs);cfg(e);e.rpm=750;
+for(let i=0;i<N;i+=512){const t=i/fs;e.rpm=t<12?750+6450*t/12:7200-6450*(t-12)/8;e.pedal=t<12?1:0;const m=Math.min(512,N-i);e.process(L.subarray(i,i+m),R.subarray(i,i+m),m)}
+const w=wavEnc(L,R,fs);$('au').src=URL.createObjectURL(new Blob([w],{type:'audio/wav'}));fdz=zipK('S58_V12_Sound_Simulation.wav',w);$('dl').disabled=false;$('dm').textContent='WAV ready: 20 s, '+(w.length/1048576).toFixed(1)+' MB. Listen in the player or save the file.'};
+$('dl').onclick=async()=>{try{if(typeof claude==='undefined'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([fdz],{type:'application/zip'}));a.download='S58_V12_Sound_Simulation.zip';a.click();return}const d=await claude.use('downloads');if(!d){$('dm').textContent='Download unavailable here. Use the player to listen.';return}await d.save({filename:'S58_V12_Sound_Simulation.zip',data:new Blob([fdz])})}catch(x){$('dm').textContent='Download cancelled or unavailable.'}};
+/* gráficos */
+function ext(){requestAnimationFrame(ext);
+const e=E||ES,v12=$('v12').checked,n=v12?12:6,rp=E?E.rpm:750,mult=v12?6:3,G=ES.G;ES.setComp(+$('loop').value,+$('up').value);ES.v12=v12;
+if(E&&$('lock').checked){E.rpm+=(+$('rpm').value-E.rpm)*.15;E.pedal=Math.max(E.pedal,.25)}
+let c;
+if(an){const d=new Uint8Array(an.frequencyBinCount),hz=ctx.sampleRate/an.fftSize;an.getByteFrequencyData(d);
+c=CV.sg;c.drawImage($('sg'),-2,0);for(let y=0;y<200;y+=2){const a=(d[Math.floor((1-y/200)*3000/hz)]||0)/255;c.fillStyle=`rgb(${a*420|0},${Math.max(0,a-.4)*420|0},${a*150|0})`;c.fillRect(798,y,2,2)}
+c=CV.os;c.clearRect(0,0,400,200);const t=new Float32Array(2048);an.getFloatTimeDomainData(t);c.strokeStyle=V('--ac');c.beginPath();for(let i=0;i<2048;i++){const px=i/2048*400,py=100-t[i]*90;i?c.lineTo(px,py):c.moveTo(px,py)}c.stroke()}
+else{c=CV.os;c.clearRect(0,0,400,200);TX(c,'Start the audio to see the signal',12,24)}
+/* ignição */
+c=CV.fr;c.clearRect(0,0,400,200);const fm=44,ang=a=>fm+a/720*344;
+for(let r=0;r<6;r++){const y=18+r*26;TX(c,'Cyl '+(r+1),2,y+4);c.strokeStyle=V('--bd');c.beginPath();c.moveTo(fm,y);c.lineTo(fm+344,y);c.stroke()}
+for(let k=0;k<n;k++){const cy=v12?k+1:FIR[k],bk=v12?k%2:(cy<=3?0:1);c.fillStyle=bk?V('--rd'):V('--ac');c.beginPath();c.arc(ang(k*720/n),18+((cy-1)%6)*26,v12?5:7,0,7);c.fill()}
+for(let a=0;a<=720;a+=120)TX(c,a+'°',ang(a)-8,192);const cu=((e.ang%720)+720)%720;c.strokeStyle=V('--fg');c.lineWidth=2;c.beginPath();c.moveTo(ang(cu),4);c.lineTo(ang(cu),176);c.stroke();c.lineWidth=1;
+/* rpm x freq */
+c=CV.rf;c.clearRect(0,0,800,200);const gx=r=>40+(r-750)/6450*750,gy=f=>176-f/3200*165;
+c.fillStyle=V('--ac');c.globalAlpha=.1;c.fillRect(40,gy(900),750,gy(400)-gy(900));c.globalAlpha=1;
+[[1,'--ac'],[2,'--rd'],[3,'--mu']].forEach(([m,k])=>{c.strokeStyle=V(k);c.lineWidth=2;c.beginPath();let on=0;for(let r=750;r<=7200;r+=150){const f=r/60*mult*m;if(f>3200)break;on?c.lineTo(gx(r),gy(f)):c.moveTo(gx(r),gy(f));on=1}c.stroke();TX(c,m+'×',gx(Math.min(7200,3200/(mult*m/60)))-6,gy(Math.min(3200,7200/60*mult*m))-4,V(k))});c.lineWidth=1;
+const fj=530/(4*G.jp/1000);c.setLineDash([5,4]);c.strokeStyle=V('--rd');c.beginPath();c.moveTo(40,gy(fj));c.lineTo(790,gy(fj));c.stroke();c.setLineDash([]);TX(c,'J-pipe '+fj.toFixed(0)+' Hz',46,gy(fj)-4,V('--rd'));
+c.strokeStyle=V('--fg');c.beginPath();c.moveTo(gx(rp),6);c.lineTo(gx(rp),176);c.stroke();
+for(let r=1000;r<=7000;r+=1000)TX(c,r/1000+'k',gx(r)-6,194);for(let f=0;f<=3000;f+=1000)TX(c,f/1000+'k',8,gy(f)+4);
+/* trajeto */
+c=CV.wg;c.clearRect(0,0,800,230);const S=ES.segs,tm=(a,b)=>(S[a].mm/S[a].c+S[b].mm/S[b].c)/1000,dt=(tm(0,2)-tm(1,3))*1e6,ok=Math.abs(dt)<20;
+const bx=(x,y,w,h,t,k)=>{c.strokeStyle=k||V('--bd');c.lineWidth=1.5;c.strokeRect(x,y,w,h);TX(c,t,x+5,y+h/2+4,V('--fg'))},ln=(a,b,x2,y2,k,w)=>{c.strokeStyle=k;c.lineWidth=w||4;c.beginPath();c.moveTo(a,b);c.lineTo(x2,y2);c.stroke();c.lineWidth=1};
+bx(6,38,92,38,'Cyl 1-2-3',V('--ac'));bx(6,134,92,38,'Cyl 4-5-6',V('--rd'));bx(110,38,70,38,'Turbo 1');bx(110,134,70,38,'Turbo 2');
+ln(98,57,110,57,V('--ac'));ln(98,153,110,153,V('--rd'));ln(180,57,380,57,V('--ac'));ln(180,153,380,153,V('--rd'));ln(380,57,430,105,V('--fg'));ln(380,153,430,105,V('--fg'));
+TX(c,'Downpipe '+S[0].mm.toFixed(0)+' mm',186,48,V('--ac'));TX(c,'Pipe '+S[2].mm.toFixed(0)+' mm (loop '+$('loop').value+')',186,76,V('--ac'));
+TX(c,'Downpipe '+S[1].mm.toFixed(0)+' mm',186,144,V('--rd'));TX(c,'Pipe '+S[3].mm.toFixed(0)+' mm (extra '+$('up').value+')',186,172,V('--rd'));
+bx(430,88,92,34,'X-pipe '+S[4].mm.toFixed(0));ln(522,105,780,105,V('--fg'),5);ln(600,105,600,175,V('--rd'),3);bx(570,178,100,26,'J-pipe '+G.jp+' mm',V('--rd'));
+bx(535,60,74,24,'Muffler');bx(617,60,52,24,'Y');bx(678,60,100,24,'Tips ⌀'+(2*(101.6)/2|0));
+c.font='600 13px system-ui';TX(c,'Bank-to-bank Δt at the X-pipe inlet = '+dt.toFixed(0)+' µs'+(ok?' (equalized)':' (banks out of phase; Bank 2 extra ≈ '+(dt*1e-6*570*1000).toFixed(0)+' mm)'),190,22,ok?V('--ac'):V('--rd'));c.font='12px system-ui';
+/* resposta */
+c=CV.fz;c.clearRect(0,0,800,220);const fx=f=>30+f/3000*760,hzb=44100/8192;
+if(IR){const mx=Math.max(...IR[0],...IR[1]),gy2=d=>196-Math.max(0,Math.min(1,(d-mx+50)/50))*180;[[1,'--rd'],[0,'--ac']].forEach(([i,k])=>{c.strokeStyle=V(k);c.lineWidth=2;c.beginPath();IR[i].forEach((d,b)=>{const px=fx(b*hzb),py=gy2(d);b?c.lineTo(px,py):c.moveTo(px,py)});c.stroke()});c.lineWidth=1;
+[0,-10,-20,-30,-40].forEach(d=>TX(c,d+' dB',0,gy2(mx+d)+4))}else TX(c,'Calculating…',12,24);
+for(let f=0;f<=3000;f+=500)TX(c,f>=1000?f/1000+'k':f,fx(f)-8,214);
+c.setLineDash([4,4]);c.strokeStyle=V('--mu');[1,3,5].forEach(m=>{c.beginPath();c.moveTo(fx(fj*m),4);c.lineTo(fx(fj*m),196);c.stroke()});c.setLineDash([]);TX(c,'J-pipe quarter-wave modes (1×, 3×, 5×)',fx(fj*5)+6,14);TX(c,'blue: valve open · red: closed',520,36,V('--fg'))}
+ext();
+</script><script>
+/* câmbio 8HP: modelo longitudinal do carro + máquina de trocas */
+const TC={r:[4.714,3.143,2.106,1.667,1.285,1,.839,.667],fd:3.15,R:.337,m:1800,tq:[[750,200],[1500,420],[2000,520],[2750,650],[5500,650],[6250,581],[7200,520]]},K9=9.5493;
+const trq=r=>{const t=TC.tq;if(r<=t[0][0])return t[0][1];for(let i=1;i<t.length;i++)if(r<=t[i][0]){const a=t[i-1],b=t[i];return a[1]+(b[1]-a[1])*(r-a[0])/(b[0]-a[0])}return t[t.length-1][1]};
+const sm=x=>{x=Math.max(0,Math.min(1,x));return x*x*(3-2*x)},upR=(th,S)=>S?2600+th*4300:1850+th*5050,dnR=(th,S)=>S?1500+th*2000:1000+th*1500;
+const rwG=(v,g)=>v/TC.R*TC.r[g-1]*TC.fd*K9,vAt=(rp,g)=>rp/(K9*TC.r[g-1]*TC.fd)*TC.R;
+const GM={v:0,g:1,sh:null,lock:0,rpm:750,req:0,brake:0,zt:null,zd:null,h:[],ha:0};
+function startShift(to,S){const n=Math.abs(to-GM.g),up=to>GM.g;GM.sh={f:GM.g,to,t:0,up,dur:(up?(S?.16:.3):(S?.2:.34))+.06*(n-1)}}
+function gstep(dt,th,S,M){const brake=GM.brake?1:0;GM.lock=Math.max(0,GM.lock-dt);
+if(!GM.sh){const g=GM.g,rw=rwG(GM.v,g),rq=GM.req;GM.req=0;
+ if(rq){const to=g+rq;if(to>=1&&to<=8&&(rq>0?rwG(GM.v,to)>1100:rwG(GM.v,to)<7000))startShift(to,S)}
+ else if(!M&&GM.lock<=0){if(th>.85&&rw<3300&&g>1)for(let c=g-1;c>=1;c--){const r=rwG(GM.v,c);if(r>=4000&&r<=6400){startShift(c,S);break}}
+  if(!GM.sh&&g<8&&rw>upR(th,S)&&rwG(GM.v,g+1)>1100)startShift(g+1,S);else if(!GM.sh&&g>1&&rw<dnR(th,S)&&rwG(GM.v,g-1)<6300)startShift(g-1,S)}
+ else if(M&&GM.lock<=0&&g>1&&rw<1000&&GM.v>.5)startShift(g-1,S);
+ if(GM.v<.3&&GM.g>1&&!GM.sh)GM.g=1}
+let ratio=TC.r[GM.g-1],dip=0,p=0;
+if(GM.sh){const s=GM.sh;s.t+=dt;p=Math.min(1,s.t/s.dur);const mx=sm((p-.25)/.75);ratio=TC.r[s.f-1]*(1-mx)+TC.r[s.to-1]*mx;dip=Math.sin(Math.PI*p)*(S?.5:.8);
+ if(p>=1){GM.g=s.to;GM.lock=.9;ratio=TC.r[GM.g-1];GM.sh=null}}
+const sh=GM.sh,rw=GM.v/TC.R*ratio*TC.fd*K9,unl=GM.g===1&&!sh,st=750+th*2650,tgt=Math.max(750,unl?Math.max(rw,st):rw);
+GM.rpm+=(tgt-GM.rpm)*Math.min(1,dt/.05);
+let T=th>.03?trq(GM.rpm)*(.1+.9*th):-(30+.03*GM.rpm);if(GM.rpm>7150&&T>0)T=0;T*=1-dip;
+const mult=unl?1+.6*Math.max(0,1-rw/(st+1)):1;let F=Math.min(T*mult*ratio*TC.fd*.9/TC.R,14000);if(th<.03&&!brake&&GM.v<2)F+=500;
+const vv=GM.v;let net=F-(.47*vv*vv+(vv>.01?250:0))-(brake?15000:0);if(vv<=.01&&net<0)net=0;GM.v=Math.max(0,vv+net/(TC.m*1.08)*dt);
+if(GM.v<.05){GM.zt=null}else{if(GM.zt===null){GM.zt=0;GM.zd=null}GM.zt+=dt;if(GM.zd===null&&GM.v>=100/3.6)GM.zd=GM.zt}
+let ped=th*(1-dip);if(sh&&S&&sh.up&&th>.5&&p>.3&&p<.75)ped=0;if(sh&&!sh.up&&(S||M)&&p>.2&&p<.8)ped=Math.max(ped,.4);
+return{ped,rpm:Math.min(7200,GM.rpm),p}}
+/* interface */
+const GC={};['gx','gr','gh','gt'].forEach(i=>{GC[i]=$(i).getContext('2d');GC[i].font='12px system-ui'});
+$('gbar').innerHTML=[1,2,3,4,5,6,7,8].map(i=>`<i id="gg${i}">${i}</i>`).join('');
+$('bup').onclick=()=>{$('atm').value='M';GM.req=1};$('bdn').onclick=()=>{$('atm').value='M';GM.req=-1};
+const gb=v=>()=>GM.brake=v;$('brk').onpointerdown=gb(1);$('brk').onpointerup=$('brk').onpointerleave=gb(0);
+$('rst').onclick=()=>{GM.v=0;GM.g=1;GM.sh=null;GM.rpm=750;GM.zt=null;GM.zd=null};
+addEventListener('keydown',e=>{if(e.key==='ArrowRight'){$('bup').click();e.preventDefault()}if(e.key==='ArrowLeft'){$('bdn').click();e.preventDefault()}if(e.key==='b'||e.key==='B')GM.brake=1});
+addEventListener('keyup',e=>{if(e.key==='b'||e.key==='B')GM.brake=0});
+let gl=performance.now();
+function gext(){requestAnimationFrame(gext);const now=performance.now(),dt=Math.min(.05,(now-gl)/1000);gl=now;
+const on=$('atx').checked&&!$('lock').checked;$('gear').disabled=on;const S=$('atm').value==='S',M=$('atm').value==='M';
+let th=typeof held!=='undefined'&&held?1:+$('thr').value/100;if(typeof sw!=='undefined'&&sw&&(Date.now()-sw)/1000<9)th=1;
+let o={p:0};if(on){o=gstep(dt,th,S,M);if(E){E.rpm=o.rpm;E.pedal=o.ped;E.gear=3}
+ GM.ha+=dt;if(GM.ha>=.1){GM.ha=0;GM.h.push([GM.v*3.6,GM.rpm,GM.sh?GM.sh.to:GM.g,th]);if(GM.h.length>300)GM.h.shift()}}
+const g=GM.sh?GM.sh.to:GM.g;$('gdisp').textContent=(on?$('atm').value:'–')+g;for(let i=1;i<=8;i++){const d=$('gg'+i);d.style.background=i===g?'var(--ac)':'';d.style.color=i===g?'#fff':''}
+$('gtx').textContent=on?`${(GM.v*3.6).toFixed(0)} km/h · ${Math.round(GM.rpm)} rpm · ${GM.sh?'shifting '+GM.sh.f+'→'+GM.sh.to+' ('+Math.round(o.p*100)+'%)':'in gear'}${GM.zd!==null?' · 0–100 km/h: '+GM.zd.toFixed(1)+' s':''}${GM.brake?' · brake':''}`:'Gearbox off or rpm locked.';
+const sp=GM.v*3.6;let c=GC.gx;c.clearRect(0,0,400,200);const px=k=>36+k/300*350,py=t=>176-t*160;
+for(let i=1;i<=7;i++){const col=`hsl(${i*42},65%,52%)`;[[0,upR],[1,dnR]].forEach(([d,f])=>{c.strokeStyle=col;c.setLineDash(d?[4,3]:[]);c.beginPath();for(let k=0;k<=10;k++){const t=k/10,x=px(vAt(f(t,S),d?i+1:i)*3.6);k?c.lineTo(x,py(t)):c.moveTo(x,py(t))}c.stroke()})}
+c.setLineDash([]);for(let k=0;k<=300;k+=100)TX(c,k,px(k)-8,194);TX(c,'100%',2,py(1)+4);TX(c,'0%',10,py(0)+4);c.fillStyle=V('--rd');c.beginPath();c.arc(px(Math.min(300,sp)),py(th),6,0,7);c.fill();
+c=GC.gr;c.clearRect(0,0,400,200);const ry=r=>176-r/7500*165;
+for(let i=1;i<=8;i++){c.strokeStyle=`hsl(${i*40},65%,52%)`;c.lineWidth=1.5;c.beginPath();for(let k=0;k<=300;k+=5){const r=rwG(k/3.6,i);if(r>7500)break;k?c.lineTo(px(k),ry(r)):c.moveTo(px(k),ry(r))}c.stroke();TX(c,i,px(Math.min(300,vAt(7400,i)*3.6))-4,ry(Math.min(7400,rwG(300/3.6,i)))-4,c.strokeStyle)}
+c.lineWidth=1;c.setLineDash([5,4]);c.strokeStyle=V('--rd');c.beginPath();c.moveTo(36,ry(7200));c.lineTo(386,ry(7200));c.stroke();c.setLineDash([]);
+for(let k=0;k<=300;k+=100)TX(c,k+'',px(k)-8,194);for(let r=0;r<=7000;r+=1000)TX(c,r/1000+'k',6,ry(r)+4);c.fillStyle=V('--fg');c.beginPath();c.arc(px(Math.min(300,sp)),ry(Math.min(7500,GM.rpm)),5,0,7);c.fill();
+c=GC.gh;c.clearRect(0,0,800,200);const H=GM.h,hx=i=>36+i/300*750;
+c.fillStyle=V('--mu');c.globalAlpha=.18;c.beginPath();c.moveTo(hx(0),176);H.forEach((q,i)=>c.lineTo(hx(i),176-q[3]*160));c.lineTo(hx(H.length-1),176);c.fill();c.globalAlpha=1;
+[[1,'--ac',7500],[0,'--rd',300]].forEach(([k,col,mx])=>{c.strokeStyle=V(col);c.lineWidth=2;c.beginPath();H.forEach((q,i)=>{const y=176-q[k]/mx*160;i?c.lineTo(hx(i),y):c.moveTo(hx(i),y)});c.stroke()});
+c.strokeStyle=V('--fg');c.lineWidth=1.5;c.beginPath();H.forEach((q,i)=>{const y=176-q[2]/8*160;i?c.lineTo(hx(i),y):c.moveTo(hx(i),y)});c.stroke();c.lineWidth=1;
+TX(c,'blue: rpm (0–7,500) · red: km/h (0–300) · white: gear (1–8)',40,14,V('--fg'));TX(c,'−30 s',36,194);TX(c,'now',750,194);
+c=GC.gt;c.clearRect(0,0,800,180);const tx=r=>40+(r-750)/6450*740;
+[[0,'--ac',700],[1,'--rd',400]].forEach(([k,col,mx])=>{c.strokeStyle=V(col);c.lineWidth=2;c.beginPath();for(let r=750;r<=7200;r+=50){const t=trq(r),y=156-(k?t*r/9549:t)/mx*140;r>750?c.lineTo(tx(r),y):c.moveTo(tx(r),y)}c.stroke()});c.lineWidth=1;
+TX(c,'blue: torque (max 650 Nm) · red: power (≈380 kW at 6,250 rpm)',44,14,V('--fg'));for(let r=1000;r<=7000;r+=1000)TX(c,r/1000+'k',tx(r)-6,174);
+c.strokeStyle=V('--fg');c.beginPath();c.moveTo(tx(GM.rpm),20);c.lineTo(tx(GM.rpm),158);c.stroke()}
+gext();
+</script></body></html>

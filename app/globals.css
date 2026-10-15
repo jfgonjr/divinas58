@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+html { background: #000; scroll-behavior: smooth; scroll-padding-top: 72px; }
+body { background: #000; color: #e5e7eb; }
+::selection { background: #8FD3F4; color: #000; }
+
+/* ---- Flower logo (ice white) ---- */
+.flor {
+  --f1: #EAF6FF; --f2: #8FD3F4; --flor-fundo: #000;
+  width: 36px; height: 36px; display: inline-block; overflow: visible; flex: none;
+}
+.flor .pt { fill: var(--f1); stroke: var(--flor-fundo); stroke-width: .9; stroke-linejoin: round; }
+.flor .in { transform-box: fill-box; transform-origin: center; animation: flor-respira 9s ease-in-out infinite; }
+.flor .in .pt { fill: var(--f2); fill-opacity: .34; stroke: none; }
+.flor .ct { fill: var(--f2); }
+@keyframes flor-respira { 0%,100% { transform: scale(1) rotate(0deg); } 50% { transform: scale(1.07) rotate(8deg); } }
+@media (prefers-reduced-motion: reduce) { .flor .in { animation: none; } html { scroll-behavior: auto; } }
+
+.panel { @apply rounded-2xl border border-white/10 bg-white/[0.025]; }
+.eyebrow { @apply font-mono text-xs uppercase tracking-[0.25em] text-ice2; }
